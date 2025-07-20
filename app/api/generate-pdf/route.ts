@@ -77,13 +77,46 @@ export async function POST(request: NextRequest) {
     // Launch Puppeteer with Vercel-compatible configuration
     const isLocal = process.env.NODE_ENV === 'development';
     
-    browser = await puppeteer.launch({
-      args: isLocal ? ['--no-sandbox', '--disable-setuid-sandbox'] : chromium.args,
+    console.log('Environment:', { isLocal, NODE_ENV: process.env.NODE_ENV });
+    
+    let executablePath;
+    if (!isLocal) {
+      try {
+        executablePath = await chromium.executablePath();
+        console.log('Chromium executable path:', executablePath);
+      } catch (error) {
+        console.error('Failed to get chromium executable path:', error);
+        throw new Error('Chromium setup failed');
+      }
+    }
+    
+    const launchOptions = {
+      args: isLocal ? 
+        ['--no-sandbox', '--disable-setuid-sandbox'] : 
+        [
+          ...chromium.args,
+          '--disable-web-security',
+          '--disable-features=VizDisplayCompositor',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding'
+        ],
       defaultViewport: chromium.defaultViewport,
-      executablePath: isLocal ? undefined : await chromium.executablePath(),
-      headless: chromium.headless === 'new' ? true : chromium.headless,
+      executablePath: isLocal ? undefined : executablePath,
+      headless: true,
       ignoreHTTPSErrors: true,
-    });
+      timeout: 30000, // 30 second timeout
+    };
+    
+    console.log('Puppeteer launch options:', JSON.stringify(launchOptions, null, 2));
+    
+    try {
+      browser = await puppeteer.launch(launchOptions);
+      console.log('Browser launched successfully');
+    } catch (error) {
+      console.error('Browser launch failed:', error);
+      throw error;
+    }
 
     const page = await browser.newPage();
     
@@ -133,24 +166,43 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Provide specific error messages
+    // Provide specific error messages with better debugging
     if (error instanceof Error) {
-      if (error.message.includes('Failed to launch')) {
+      console.error('PDF Generation Error Details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      if (error.message.includes('Failed to launch') || error.message.includes('Chromium setup failed')) {
         return NextResponse.json(
-          { error: 'PDF generation service unavailable' },
+          { 
+            error: 'PDF generation service unavailable',
+            details: `Browser launch failed: ${error.message}`,
+            environment: process.env.NODE_ENV
+          },
           { status: 503 }
         );
       }
       if (error.message.includes('Navigation')) {
         return NextResponse.json(
-          { error: 'Failed to render PDF content' },
+          { error: 'Failed to render PDF content', details: error.message },
           { status: 500 }
         );
       }
+      
+      return NextResponse.json(
+        { 
+          error: 'Failed to generate PDF', 
+          details: error.message,
+          type: error.name 
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json(
-      { error: 'Failed to generate PDF' },
+      { error: 'Unknown PDF generation error' },
       { status: 500 }
     );
   }
