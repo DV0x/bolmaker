@@ -7,6 +7,16 @@ import { BOLData } from '@/types/bol';
 // Force Chrome to use bundled Chromium in production
 chromium.setGraphicsMode = false;
 
+interface LaunchOptions {
+  headless?: boolean | 'shell';
+  args?: string[];
+  executablePath?: string;
+  defaultViewport?: {
+    width: number;
+    height: number;
+  } | null;
+}
+
 export async function POST(request: NextRequest) {
   let browser;
   
@@ -89,12 +99,13 @@ export async function POST(request: NextRequest) {
       VERCEL: process.env.VERCEL 
     });
     
-    let executablePath;
-    let launchOptions;
+    let executablePath: string;
+    let coreOptions: LaunchOptions;
+    let regularOptions: LaunchOptions;
 
     if (isLocal) {
       // Local development - use system Chrome or bundled Chromium
-      launchOptions = {
+      regularOptions = {
         headless: true,
         args: [
           '--no-sandbox',
@@ -107,13 +118,14 @@ export async function POST(request: NextRequest) {
           '--disable-gpu'
         ]
       };
+      coreOptions = regularOptions;
     } else {
       // Production - use @sparticuz/chromium
       try {
         executablePath = await chromium.executablePath();
         console.log('Chromium executable path:', executablePath);
         
-        launchOptions = {
+        coreOptions = {
           args: [
             ...chromium.args,
             '--hide-scrollbars',
@@ -122,8 +134,21 @@ export async function POST(request: NextRequest) {
           ],
           defaultViewport: chromium.defaultViewport,
           executablePath,
-          headless: chromium.headless,
-          ignoreHTTPSErrors: true,
+          headless: true,
+        };
+        
+        regularOptions = {
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+          ]
         };
       } catch (error) {
         console.error('Failed to get chromium executable path:', error);
@@ -131,21 +156,21 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    console.log('Puppeteer launch options:', JSON.stringify(launchOptions, null, 2));
+    console.log('Puppeteer launch options (core):', JSON.stringify(coreOptions, null, 2));
     
     try {
       // Try puppeteer-core first (for production with @sparticuz/chromium)
       if (!isLocal) {
-        browser = await puppeteerCore.launch(launchOptions);
+        browser = await puppeteerCore.launch(coreOptions);
         console.log('Browser launched successfully with puppeteer-core');
       } else {
         // For local development, try puppeteer with bundled Chromium first
         try {
-          browser = await puppeteer.launch(launchOptions);
+          browser = await puppeteer.launch(regularOptions);
           console.log('Browser launched successfully with puppeteer (bundled Chromium)');
-        } catch (localError) {
+        } catch {
           console.log('Fallback to puppeteer-core for local development');
-          browser = await puppeteerCore.launch(launchOptions);
+          browser = await puppeteerCore.launch(coreOptions);
           console.log('Browser launched successfully with puppeteer-core fallback');
         }
       }
@@ -156,19 +181,7 @@ export async function POST(request: NextRequest) {
       if (!isLocal) {
         try {
           console.log('Attempting fallback to puppeteer with bundled Chromium...');
-          browser = await puppeteer.launch({
-            headless: true,
-            args: [
-              '--no-sandbox',
-              '--disable-setuid-sandbox',
-              '--disable-dev-shm-usage',
-              '--disable-accelerated-2d-canvas',
-              '--no-first-run',
-              '--no-zygote',
-              '--single-process',
-              '--disable-gpu'
-            ]
-          });
+          browser = await puppeteer.launch(regularOptions);
           console.log('Fallback browser launched successfully');
         } catch (fallbackError) {
           console.error('All browser launch attempts failed:', fallbackError);
