@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 import { BOLData } from '@/types/bol';
 
 export async function POST(request: NextRequest) {
@@ -73,19 +74,15 @@ export async function POST(request: NextRequest) {
       </html>
     `;
 
-    // Launch Puppeteer
+    // Launch Puppeteer with Vercel-compatible configuration
+    const isLocal = process.env.NODE_ENV === 'development';
+    
     browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu'
-      ]
+      args: isLocal ? ['--no-sandbox', '--disable-setuid-sandbox'] : chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: isLocal ? undefined : await chromium.executablePath(),
+      headless: chromium.headless === 'new' ? true : chromium.headless,
+      ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
