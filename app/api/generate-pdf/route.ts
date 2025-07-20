@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import puppeteer from 'puppeteer-core';
+import puppeteerCore from 'puppeteer-core';
+import puppeteer from 'puppeteer';
 import chromium from '@sparticuz/chromium';
 import { BOLData } from '@/types/bol';
+
+// Force Chrome to use bundled Chromium in production
+chromium.setGraphicsMode = false;
 
 export async function POST(request: NextRequest) {
   let browser;
@@ -74,48 +78,105 @@ export async function POST(request: NextRequest) {
       </html>
     `;
 
-    // Launch Puppeteer with Vercel-compatible configuration
+    // Launch Puppeteer with environment-specific configuration
     const isLocal = process.env.NODE_ENV === 'development';
+    const isVercel = process.env.VERCEL === '1';
     
-    console.log('Environment:', { isLocal, NODE_ENV: process.env.NODE_ENV });
+    console.log('Environment:', { 
+      isLocal, 
+      isVercel,
+      NODE_ENV: process.env.NODE_ENV,
+      VERCEL: process.env.VERCEL 
+    });
     
     let executablePath;
-    if (!isLocal) {
+    let launchOptions;
+
+    if (isLocal) {
+      // Local development - use system Chrome or bundled Chromium
+      launchOptions = {
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu'
+        ]
+      };
+    } else {
+      // Production - use @sparticuz/chromium
       try {
         executablePath = await chromium.executablePath();
         console.log('Chromium executable path:', executablePath);
+        
+        launchOptions = {
+          args: [
+            ...chromium.args,
+            '--hide-scrollbars',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+          ],
+          defaultViewport: chromium.defaultViewport,
+          executablePath,
+          headless: chromium.headless,
+          ignoreHTTPSErrors: true,
+        };
       } catch (error) {
         console.error('Failed to get chromium executable path:', error);
-        throw new Error('Chromium setup failed');
+        throw new Error(`Chromium setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
-    
-    const launchOptions = {
-      args: isLocal ? 
-        ['--no-sandbox', '--disable-setuid-sandbox'] : 
-        [
-          ...chromium.args,
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding'
-        ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: isLocal ? undefined : executablePath,
-      headless: true,
-      ignoreHTTPSErrors: true,
-      timeout: 30000, // 30 second timeout
-    };
     
     console.log('Puppeteer launch options:', JSON.stringify(launchOptions, null, 2));
     
     try {
-      browser = await puppeteer.launch(launchOptions);
-      console.log('Browser launched successfully');
+      // Try puppeteer-core first (for production with @sparticuz/chromium)
+      if (!isLocal) {
+        browser = await puppeteerCore.launch(launchOptions);
+        console.log('Browser launched successfully with puppeteer-core');
+      } else {
+        // For local development, try puppeteer with bundled Chromium first
+        try {
+          browser = await puppeteer.launch(launchOptions);
+          console.log('Browser launched successfully with puppeteer (bundled Chromium)');
+        } catch (localError) {
+          console.log('Fallback to puppeteer-core for local development');
+          browser = await puppeteerCore.launch(launchOptions);
+          console.log('Browser launched successfully with puppeteer-core fallback');
+        }
+      }
     } catch (error) {
       console.error('Browser launch failed:', error);
-      throw error;
+      
+      // Final fallback - try puppeteer with minimal options
+      if (!isLocal) {
+        try {
+          console.log('Attempting fallback to puppeteer with bundled Chromium...');
+          browser = await puppeteer.launch({
+            headless: true,
+            args: [
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-dev-shm-usage',
+              '--disable-accelerated-2d-canvas',
+              '--no-first-run',
+              '--no-zygote',
+              '--single-process',
+              '--disable-gpu'
+            ]
+          });
+          console.log('Fallback browser launched successfully');
+        } catch (fallbackError) {
+          console.error('All browser launch attempts failed:', fallbackError);
+          throw new Error(`Browser launch failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      } else {
+        throw error;
+      }
     }
 
     const page = await browser.newPage();
