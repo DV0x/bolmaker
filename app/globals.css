@@ -120,3 +120,24 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom animations for background elements */
+@keyframes float-delay-2000 {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-20px) rotate(180deg); }
+}
+
+@keyframes float-delay-4000 {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-15px) rotate(-180deg); }
+}
+
+.animation-delay-2000 {
+  animation: float-delay-2000 6s ease-in-out infinite;
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation: float-delay-4000 8s ease-in-out infinite;
+  animation-delay: 4s;
+}
